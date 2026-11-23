@@ -157,7 +157,7 @@ window.zoekplaatje = {
             // get items from module parser (will often be an empty list)
             // a module that fails on a response must not stop the other modules
             try {
-                item_list = this.modules[module].callback(response, source_platform_url, source_url, nav_index);
+                item_list = await this.modules[module].callback(response, source_platform_url, source_url, nav_index);
             } catch (error) {
                 console.error(`Zoekplaatje module ${module} could not parse ${source_url}`, error);
                 continue;

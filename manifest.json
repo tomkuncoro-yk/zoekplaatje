@@ -2,7 +2,7 @@
 
   "description": "Collect results while using search engines for later analysis",
   "manifest_version": 2,
-  "name": "Zoekplaatje",
+  "name": "Zoek",
   "version": "1.11",
   "homepage_url": "https://github.com/digitalmethodsinitiative/zoekplaatje",
 
@@ -21,7 +21,7 @@
 
   "browser_action": {
     "default_icon": "images/icon-96.png",
-    "default_title": "Zoekplaatje"
+    "default_title": "Zoek"
   },
 
   "permissions": [

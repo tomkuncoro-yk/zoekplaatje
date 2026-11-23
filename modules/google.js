@@ -1,7 +1,7 @@
 zoekplaatje.register_module(
     'Google',
     'google.com',
-    function (response, source_platform_url, source_url) {
+    async function (response, source_platform_url, source_url) {
         //console.log(response)
         let results = [];
         let results_sidebar = [];
@@ -229,6 +229,51 @@ zoekplaatje.register_module(
                     }
                 }
             }
+        }
+
+        // Resolve AI overview source links to the real page URL and domain.
+        // /goto?url=... links are only valid while the google page is open, so this runs now.
+        let gemini_full_links = []
+        let gemini_domains = []
+        let gemini_resolved = []
+
+        for (let gemini_link of gemini_links) {
+            let gemini_url = new URL(gemini_link, 'https://' + domain)
+            let gemini_is_resolved = true
+
+            if (gemini_url.pathname === '/goto') {
+                let gemini_final_url = ''
+
+                try {
+                    // actual navigation: open the link in a background tab and wait until it has left google
+                    let gemini_tab = await browser.tabs.create({url: gemini_url.href, active: false})
+                    let gemini_waited = 0
+
+                    while (gemini_waited < 15000) {
+                        await new Promise(resolve => setTimeout(resolve, 250))
+                        gemini_waited += 250
+                        let gemini_tab_now = await browser.tabs.get(gemini_tab.id)
+                        gemini_final_url = gemini_tab_now.url
+                        if (gemini_final_url.indexOf('http') === 0 && new URL(gemini_final_url).hostname.indexOf('google.') < 0) {
+                            break
+                        }
+                    }
+
+                    await browser.tabs.remove(gemini_tab.id)
+                } catch (error) {
+                    console.error('Could not resolve goto link', gemini_url.href, error)
+                }
+
+                if (gemini_final_url.indexOf('http') === 0 && new URL(gemini_final_url).hostname.indexOf('google.') < 0) {
+                    gemini_url = new URL(gemini_final_url)
+                } else {
+                    gemini_is_resolved = false
+                }
+            }
+
+            gemini_full_links.push(gemini_url.href)
+            gemini_domains.push(gemini_url.hostname.replace(/^www\./, ''))
+            gemini_resolved.push(gemini_is_resolved)
         }
 
         if (result_items) {
@@ -815,12 +860,77 @@ zoekplaatje.register_module(
                     title: '',
                     description: gemini_text.join(" "),
                     link: gemini_links.join(", "),
+                    scraped_link: gemini_full_links.join(", "),
+                    scraped_domain: gemini_domains.join(", "),
+                    scraped_resolved: gemini_resolved.join(", "),
                     section: 'top'
             }]
             results = result_gemini.concat(results)
         }
         if (results_sidebar) {
             results = results.concat(results_sidebar)
+        }
+
+        // Resolve the link of every other result as well (organic results, widgets, ads, sidebar).
+        // Adds scraped_link (full final URL), scraped_domain and scraped_resolved.
+        // Google wrapper links (/url?q=...) are unwrapped; /goto?url=... links are followed
+        // by opening them in a background tab while the google page is still open. Direct links are kept as they are.
+        for (let result_item of results) {
+            if (result_item['type'] === 'ai-overview') {
+                continue;
+            }
+            if (!result_item['link']) {
+                continue;
+            }
+
+            let item_url
+            try {
+                item_url = new URL(result_item['link'], 'https://' + domain)
+            } catch (error) {
+                continue
+            }
+            let item_is_resolved = true
+
+            if (item_url.hostname.indexOf('google.') >= 0 && item_url.pathname === '/url') {
+                let item_wrapped_target = item_url.searchParams.get('q') || item_url.searchParams.get('url')
+                if (item_wrapped_target && item_wrapped_target.indexOf('http') === 0) {
+                    item_url = new URL(item_wrapped_target)
+                }
+            }
+
+            if (item_url.hostname.indexOf('google.') >= 0 && item_url.pathname === '/goto') {
+                let item_final_url = ''
+
+                try {
+                    // actual navigation: open the link in a background tab and wait until it has left google
+                    let item_tab = await browser.tabs.create({url: item_url.href, active: false})
+                    let item_waited = 0
+
+                    while (item_waited < 15000) {
+                        await new Promise(resolve => setTimeout(resolve, 250))
+                        item_waited += 250
+                        let item_tab_now = await browser.tabs.get(item_tab.id)
+                        item_final_url = item_tab_now.url
+                        if (item_final_url.indexOf('http') === 0 && new URL(item_final_url).hostname.indexOf('google.') < 0) {
+                            break
+                        }
+                    }
+
+                    await browser.tabs.remove(item_tab.id)
+                } catch (error) {
+                    console.error('Could not resolve goto link', item_url.href, error)
+                }
+
+                if (item_final_url.indexOf('http') === 0 && new URL(item_final_url).hostname.indexOf('google.') < 0) {
+                    item_url = new URL(item_final_url)
+                } else {
+                    item_is_resolved = false
+                }
+            }
+
+            result_item['scraped_link'] = item_url.href
+            result_item['scraped_domain'] = item_url.hostname.replace(/^www\./, '')
+            result_item['scraped_resolved'] = item_is_resolved
         }
 
         return results;
